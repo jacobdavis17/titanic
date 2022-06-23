@@ -51,20 +51,37 @@ def binFeature(df, featureName):
     
     
     
-#%% Dummify categoricals
+#%% Label encode categoricals
 
-def dummifyCats(dfTrain, dfTest):
-    
-    cols = ['Sex', 'Embarked']
+def labelEncodeCats(dfTrain, dfTest, colsToLabel):
     
     le = preprocessing.LabelEncoder()
         
-    for col in cols:
+    for col in colsToLabel:
         dfTrain[col] = le.fit_transform(dfTrain[col])
         dfTest[col] = le.transform(dfTest[col])
     
     return dfTrain, dfTest
       
+#%% OneHotEncode categoricals
+
+def oneHotEncodeCats(df, colsToEncode):
+    
+    for col in colsToEncode:
+        # One Hot Encode column
+        dumCols = pd.get_dummies(df[col], prefix=col)
+        
+        # Drop first col of dumCols (not needed)
+        dumCols.drop(dumCols.columns[0], axis=1, inplace=True)
+        
+        # Drop original column in df
+        df = df.drop(col, axis=1)
+        
+        # Add new one hot encoded columns to original df
+        df = pd.concat([df, dumCols], axis=1)
+        
+    return df
+        
 
 #%% Impute missing values
 
@@ -140,7 +157,7 @@ def splitData(df, test_size=0.2):
 
 # Random Forest param tester
 
-def randForParamTest(X_train, X_val, y_train, y_val):
+#def randForParamTest(X_train, X_val, y_train, y_val):
     
 
 #%% Main
@@ -158,11 +175,16 @@ if __name__ == '__main__':
     dfTrainNulls = getAllNaNs(dfTrain)
     dfTestNulls = getAllNaNs(dfTest)
     
-    # Dummify cats (only using label encoder, DID NOT actually dummify vars)
-    dfTrain, dfTest = dummifyCats(dfTrain, dfTest)
+    # Label encode cats
+    cols = ['Sex', 'Embarked']
+    dfTrain, dfTest = labelEncodeCats(dfTrain, dfTest, cols)
     
     # Impute missing values
-    dfTrainImp, dfTestImp = imputeKNN(dfTrain, dfTest)
+    dfTrainImp, dfTestImp = imputeKNN(dfTrain, dfTest)   
+    
+    # One hot encode cates 
+    cols = ['Embarked']
+    dfTrain = oneHotEncodeCats(dfTrain, cols)
     
     # Split train data into train and validation sets
     X_train, X_val, y_train, y_val = splitData(dfTrainImp, 0.2)
@@ -228,17 +250,6 @@ if __name__ == '__main__':
     print("RandFor accuracy: ", accuracy_score(y_val, predsRC))
     
     
-#%% XGBoost
-
-    #xgbc = XGBClassifier()
-    #xgbc.fit(X_train, y_train)
-    
-    #print(xgbc)
-    
-    #predsXGBC = xgbc.predict(X_val)
-    #print("RandFor accuracy: ", accuracy_score(y_val, predsXGBC))
-    
-    
 #%% Ensemble
 
     log_clf = LogisticRegression(random_state=0)
@@ -277,12 +288,66 @@ if __name__ == '__main__':
             pred = bag_clf.predict(X_val)
             
             tracker[(est,samp)] = accuracy_score(y_val, pred)
+
+#%% XGBoost (requires categorical features to be one-hot-encoded)
+
+    xgbc = XGBClassifier()
+    xgbc.fit(X_train, y_train)
+    
+    print(xgbc)
+    
+    predsXGBC = xgbc.predict(X_val)
+    print("XGBC accuracy: ", accuracy_score(y_val, predsXGBC))
+    
+#%% Lazy Predict
+
+    from lazypredict.Supervised import LazyClassifier
+    
+    clf = LazyClassifier()
+    models,predictions = clf.fit(X_train, X_val, y_train, y_val)
+    
+    print(models)
+    
+#%% LGMBClassifier 
+    import lightgbm
+    lgbm = lightgbm.LGBMClassifier()
+    
+    lgbm.fit(X_train, y_train)
+    predsLGBM = lgbm.predict(X_val)
+    print("LGBM accuracy: ", accuracy_score(y_val, predsLGBM))
+#%% LGMBClassifier Tuning
     
     
+    param_grid = {
+            'num_leaves': [2, 5, 10],
+            'min_data_in_leaf': [2, 5],
+            'max_depth': [1, 2, 3]
+            }
+       
+    lgbm = lightgbm.LGBMClassifier()
     
+    # Instantiate the grid search model
+    grid_search = GridSearchCV(estimator = lgbm, param_grid = param_grid, 
+                          cv = 5, n_jobs = -1, verbose = 2)
     
+    grid_search.fit(X_train, y_train)
+    best_model = grid_search.best_estimator_
     
-    
+    predsLGBM = best_model.predict(X_val)
+    print("LGBM accuracy: ", accuracy_score(y_val, predsLGBM))
+    #%% Boston housing 
+    from lazypredict.Supervised import LazyRegressor
+    from sklearn import datasets
+    from sklearn.utils import shuffle
+    import numpy as np
+    boston = datasets.load_boston()
+    X, y = shuffle(boston.data, boston.target, random_state=13)
+    X = X.astype(np.float32)
+    offset = int(X.shape[0] * 0.9)
+    X_train, y_train = X[:offset], y[:offset]
+    X_test, y_test = X[offset:], y[offset:]
+    reg = LazyRegressor(verbose=0,ignore_warnings=False, custom_metric=None )
+    models,predictions = reg.fit(X_train, X_test, y_train, y_test)
     
     
     

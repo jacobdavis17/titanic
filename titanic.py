@@ -47,7 +47,7 @@ def getAllNaNs(df):
 
 #%% Binning continuous features
 
-def binFeature(df, featureName):
+#def binFeature(df, featureName):
     
     
     
